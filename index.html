@@ -60,7 +60,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>BLE Controller <small style="color:var(--sub); font-size:13px;">v2.3</small></h1>
+  <h1>BLE Controller <small style="color:var(--sub); font-size:13px;">v2.4</small></h1>
   <div class="status" id="status">未接続</div>
 
   <div class="warn" id="bleWarn">⚠ このブラウザは Web Bluetooth に対応していません。<br>
@@ -104,7 +104,8 @@
     <label class="chk"><input type="checkbox" id="voiceOn"> 課題を音声で読み上げる（端末のTTS）</label>
     <label class="chk"><input type="checkbox" id="narrOn" checked> ナレーションを流す（表示＋読み上げON時は声も）</label>
     <label class="chk">ナレーションの雰囲気：<select id="narrKind"><option value="normal">標準</option><option value="spicy">えっち</option></select></label>
-    <p class="note">⚠ 実行中は画面をロックしたり、別のアプリに切り替えたりしないでください。バックグラウンドではブラウザの処理が止まり、自動で止められなくなる場合があります（画面が隠れた場合は停止を試みる処理は入れてあります）。</p>
+    <label class="chk"><input type="checkbox" id="bgKeep"> バックグラウンド継続を試みる（実験的）― ONの間は、画面を切ったり他アプリに移っても止めずに継続します。ページを閉じた場合は安全のため停止します</label>
+    <p class="note">⚠ 既定では、画面をロックしたり別のアプリに切り替えると、安全のため停止を試みます。「バックグラウンド継続」がONの場合は止めずに継続を試みますが、OSに処理を完全に止められた場合は、戻った時点で続きから再開します（その間、本体は最後の速度のまま回ります）。</p>
     <ol class="steps-list" id="stepsList"></ol>
   </div>
 
@@ -803,7 +804,7 @@ function startProgram(){
   prog.narrFired = -1;
   $('narrText').textContent = prog.narration ? '' : 'このプログラムにナレーションはありません。';
   $('progStart').textContent = '■ 終了'; $('progPause').disabled = false; $('progSkip').disabled = false;
-  acquireWakeLock();
+  acquireWakeLock(); startKeepAlive();
   beginStep(0, 0);
 }
 function beginStep(idx, overflowSec){
@@ -883,6 +884,7 @@ function stopProgram(sendZero){
   const was = prog.running;
   prog.running = false; prog.paused = false;
   releaseWakeLock();
+  stopKeepAlive();
   cancelSpeak();
   $('progStart').textContent = '▶ 開始'; $('progPause').disabled = true; $('progSkip').disabled = true; $('progPause').textContent = '⏸ 一時停止';
   if (was && sendZero) send(direction, 0);
@@ -908,10 +910,43 @@ $('progSkip').addEventListener('click', () => {
   if (prog.index + 1 < prog.steps.length) beginStep(prog.index + 1, 0); else finishProgram();
 });
 
+
+/* ---------- Background keep-alive (opt-in, experimental) ---------- */
+let keepAliveCtx = null, keepAliveSrc = null;
+function bgKeepOn(){ const el = $('bgKeep'); return !!(el && el.checked); }
+function startKeepAlive(){
+  if (!bgKeepOn() || keepAliveSrc) return;
+  try {
+    if (!keepAliveCtx) keepAliveCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (keepAliveCtx.state === 'suspended') keepAliveCtx.resume();
+    const len = keepAliveCtx.sampleRate * 2;
+    const buf = keepAliveCtx.createBuffer(1, len, keepAliveCtx.sampleRate);
+    keepAliveSrc = keepAliveCtx.createBufferSource();
+    keepAliveSrc.buffer = buf; keepAliveSrc.loop = true;
+    keepAliveSrc.connect(keepAliveCtx.destination);
+    keepAliveSrc.start();
+  } catch(e){ keepAliveSrc = null; }
+}
+function stopKeepAlive(){
+  try { if (keepAliveSrc){ keepAliveSrc.stop(); keepAliveSrc.disconnect(); keepAliveSrc = null; } } catch(e){ keepAliveSrc = null; }
+}
+try {
+  if (localStorage.getItem('ufosa-bgkeep') === '1') $('bgKeep').checked = true;
+  $('bgKeep').addEventListener('change', () => {
+    try { localStorage.setItem('ufosa-bgkeep', $('bgKeep').checked ? '1' : '0'); } catch(e){}
+    if ($('bgKeep').checked && (prog.running || patternTimer || speed > 0)) startKeepAlive();
+    if (!$('bgKeep').checked) stopKeepAlive();
+  });
+} catch(e){}
+
 /* ---------- Background safety (best effort) ---------- */
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden){ if (prog.running || patternTimer || speed > 0) stopAll(); }
-  else if (prog.running) acquireWakeLock();
+  if (document.hidden){
+    if (bgKeepOn()){ /* keep running: device holds last speed; program clock is wall-clock based and resyncs on return */ }
+    else if (prog.running || patternTimer || speed > 0) stopAll();
+  } else {
+    if (prog.running){ acquireWakeLock(); programTick(); if (bgKeepOn()) setStatus('バックグラウンドから復帰しました（プログラム継続中）'); }
+  }
 });
 window.addEventListener('pagehide', () => { stopAll(); });
 
