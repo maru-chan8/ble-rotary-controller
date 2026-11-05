@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>BLE Controller</title>
+<style>
+  :root{
+    --bg:#14151a; --card:#1e2027; --card2:#262933; --text:#f2f3f5; --sub:#9aa0ad;
+    --accent:#ff5c7a; --accent2:#4da3ff; --ok:#35c48d; --danger:#ff3b30;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;}
+  .wrap{max-width:560px; margin:0 auto; padding:16px 16px 40px;}
+  h1{font-size:20px; margin:8px 0 2px;}
+  .status{font-size:14px; color:var(--sub); margin-bottom:12px;}
+  .status b{color:var(--ok);}
+  .status .alarm{color:#ff6b60; font-weight:700;}
+  .card{background:var(--card); border-radius:16px; padding:16px; margin-bottom:14px;}
+  .card h2{font-size:14px; color:var(--sub); margin:0 0 12px; font-weight:600; letter-spacing:.05em;}
+  button{border:none; border-radius:12px; font-size:16px; font-weight:600; cursor:pointer; color:var(--text); background:var(--card2); padding:14px 10px;}
+  button:active{opacity:.75;}
+  button:disabled{opacity:.35; cursor:default;}
+  .connect{width:100%; background:var(--accent2); color:#fff; font-size:17px; padding:16px;}
+  .stop{width:100%; background:var(--danger); color:#fff; font-size:20px; padding:18px; border-radius:14px;}
+  .speed-num{font-size:64px; font-weight:800; text-align:center; line-height:1; margin:6px 0 2px;}
+  .speed-num small{font-size:22px; color:var(--sub); font-weight:600;}
+  input[type=range]{width:100%; height:44px; accent-color:var(--accent);}
+  input[type=text], input[type=number]{width:100%; background:var(--card2); color:var(--text); border:none; border-radius:10px; padding:12px; font-size:16px;}
+  .row{display:flex; gap:10px;}
+  .row > *{flex:1;}
+  .seg{display:flex; gap:10px;}
+  .seg button{flex:1;}
+  .seg button.on{background:var(--accent); color:#fff;}
+  .modes{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+  .modes button.on{background:var(--accent); color:#fff;}
+  .presets{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:10px;}
+  label.small{font-size:13px; color:var(--sub); display:block; margin:10px 0 4px;}
+  select{width:100%; background:var(--card2); color:var(--text); border:none; border-radius:10px; padding:12px; font-size:16px;}
+  .warn{background:#3a2b16; color:#ffd479; border-radius:12px; padding:12px 14px; font-size:14px; margin-bottom:14px; display:none; line-height:1.6;}
+  .note{font-size:13px; color:var(--sub); line-height:1.7;}
+  .timer{font-size:14px; color:var(--sub); text-align:center; min-height:20px;}
+  .session{background:linear-gradient(160deg,#2a1e2e,#1e2027); border:1px solid #3d2b40;}
+  .task-text{font-size:24px; font-weight:700; line-height:1.5; min-height:72px; margin:8px 0;}
+  .narr-label{font-size:12px; color:var(--sub); letter-spacing:.08em; margin-top:14px;}
+  .narr-text{font-size:18px; line-height:1.85; color:#f3e2ee; min-height:66px; margin:4px 0 8px; white-space:pre-wrap;}
+  .step-name{font-size:14px; color:var(--accent); font-weight:700;}
+  .countdown{font-size:40px; font-weight:800; text-align:right;}
+  .progress{height:10px; background:var(--card2); border-radius:6px; overflow:hidden; margin:10px 0;}
+  .progress > div{height:100%; background:var(--accent); width:0%; transition:width .3s linear;}
+  .steps-list{font-size:13px; color:var(--sub); line-height:1.9; margin:8px 0 0; padding-left:18px;}
+  .steps-list li.now{color:var(--text); font-weight:700;}
+  .custom-item{display:flex; gap:8px; align-items:center; background:var(--card2); border-radius:10px; padding:8px 10px; margin-top:8px; font-size:13px;}
+  .custom-item span{flex:1;}
+  .custom-item button{padding:8px 12px; font-size:13px; background:#3a3e4d;}
+  .chk{display:flex; align-items:center; gap:8px; font-size:15px; margin-top:10px;}
+  .chk input{width:22px; height:22px; accent-color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>BLE Controller <small style="color:var(--sub); font-size:13px;">v2.1</small></h1>
+  <div class="status" id="status">未接続</div>
+
+  <div class="warn" id="bleWarn">⚠ このブラウザは Web Bluetooth に対応していません。<br>
+  PC：Chrome / Edge で開いてください。<br>
+  iPhone：Safari・Chrome（iOS版）では使えません。App Store の無料ブラウザ <b>Bluefy</b> で、このページを https のURLで開くと使えます。</div>
+
+  <div class="card">
+    <button class="connect" id="connectBtn">接続する</button>
+    <label class="small">安全キャップ（この速度を超えません）： <span id="capVal">100</span></label>
+    <input type="range" id="cap" min="10" max="100" value="100" step="5">
+  </div>
+
+  <!-- ===== Session / Program ===== -->
+  <div class="card session">
+    <h2>プログラム（課題に合わせて自動で変化）</h2>
+    <select id="programSel">
+      <option value="test">動作テスト（1分・最初はこれ）</option>
+      <option value="endurance">じわ上げ耐久（約10分）</option>
+      <option value="randomSession">ランダム調教（約12分・毎回中身が変わる）</option>
+      <option value="stopgo">ストップ＆ゴー（約9分）</option>
+      <option value="gentle">ゆったりウェーブ（約8分）</option>
+      <option value="custom">自作プログラム</option>
+    </select>
+    <div class="task-text" id="taskText">プログラムを選んで「開始」を押すと、課題がここに大きく表示されます。</div>
+    <div class="narr-label">ナレーション（長文・流れる指示文）</div>
+    <div class="narr-text" id="narrText">課題とは別に、時間に合わせて長文の指示が流れます（全プログラム対応）。</div>
+    <div class="row" style="align-items:flex-end;">
+      <div>
+        <div class="step-name" id="stepName">待機中</div>
+        <div class="note" id="stepInfo"></div>
+      </div>
+      <div class="countdown" id="countdown">--:--</div>
+    </div>
+    <div class="progress"><div id="progBar"></div></div>
+    <div class="row">
+      <button id="progStart" style="background:var(--accent); color:#fff;">▶ 開始</button>
+      <button id="progPause" disabled>⏸ 一時停止</button>
+      <button id="progSkip" disabled>⏭ 次の課題へ</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="voiceOn"> 課題を音声で読み上げる（端末のTTS）</label>
+    <label class="chk"><input type="checkbox" id="narrOn" checked> ナレーションを流す（表示＋読み上げON時は声も）</label>
+    <p class="note">⚠ 実行中は画面をロックしたり、別のアプリに切り替えたりしないでください。バックグラウンドではブラウザの処理が止まり、自動で止められなくなる場合があります（画面が隠れた場合は停止を試みる処理は入れてあります）。</p>
+    <ol class="steps-list" id="stepsList"></ol>
+  </div>
+
+  <!-- ===== Custom program editor ===== -->
+  <div class="card" id="customCard">
+    <h2>自作プログラム編集（「自作プログラム」用）</h2>
+    <label class="small">ステップ名</label>
+    <input type="text" id="csName" placeholder="例：課題1">
+    <label class="small">課題の指示文（大きく表示されます）</label>
+    <input type="text" id="csText" placeholder="例：姿勢を保って、呼吸を数える">
+    <div class="row">
+      <div><label class="small">秒数（5〜1800）</label><input type="number" id="csSec" value="60" min="5" max="1800"></div>
+      <div><label class="small">動き</label>
+        <select id="csPattern">
+          <option value="fixed">一定</option>
+          <option value="wave">ウェーブ</option>
+          <option value="pulse">パルス（下限⇔上限）</option>
+          <option value="random">ランダム</option>
+          <option value="escalate">じわ上げ</option>
+          <option value="descend">じわ下げ</option>
+          <option value="stop">停止</option>
+        </select></div>
+    </div>
+    <div class="row">
+      <div><label class="small">下限</label><input type="number" id="csMin" value="10" min="0" max="100"></div>
+      <div><label class="small">上限</label><input type="number" id="csMax" value="50" min="0" max="100"></div>
+      <div><label class="small">方向</label>
+        <select id="csDir">
+          <option value="keep">そのまま</option>
+          <option value="cw">時計回り</option>
+          <option value="ccw">反時計回り</option>
+          <option value="flip">開始時に反転</option>
+          <option value="alternate">途中で交互</option>
+        </select></div>
+    </div>
+    <button id="csAdd" style="width:100%; margin-top:12px;">＋ このステップを追加</button>
+    <div id="customList"></div>
+    <button id="csClear" style="width:100%; margin-top:10px;">自作プログラムを全部消す</button>
+  </div>
+
+  <!-- ===== Manual ===== -->
+  <div class="card">
+    <h2>手動コントロール</h2>
+    <div class="speed-num"><span id="speedNum">0</span><small> / 100</small></div>
+    <input type="range" id="speed" min="0" max="100" value="0" step="1">
+    <div class="presets">
+      <button data-preset="20">20</button>
+      <button data-preset="40">40</button>
+      <button data-preset="60">60</button>
+      <button data-preset="80">80</button>
+    </div>
+    <label class="small">回転方向（プログラム実行中に押すと、プログラムを止めて手動に移ります）</label>
+    <div class="seg">
+      <button id="dirCw" class="on">時計回り</button>
+      <button id="dirCcw">反時計回り</button>
+    </div>
+    <label class="small">クイックパターン（手動の合間に。「手動」に戻すと回転は止まります）</label>
+    <div class="modes">
+      <button data-mode="manual" class="on">手動</button>
+      <button data-mode="wave">ウェーブ</button>
+      <button data-mode="pulse">パルス</button>
+      <button data-mode="random">ランダム</button>
+      <button data-mode="escalate">じわ上げ</button>
+      <button data-mode="alt">交互回転</button>
+    </div>
+    <label class="small">パターンの下限： <span id="minVal">10</span></label>
+    <input type="range" id="patMin" min="0" max="100" value="10">
+    <label class="small">パターンの上限： <span id="maxVal">70</span></label>
+    <input type="range" id="patMax" min="0" max="100" value="70">
+    <label class="small">変化の間隔（ウェーブの速さにも効きます）</label>
+    <select id="interval">
+      <option value="2000">ゆっくり（2秒）</option>
+      <option value="1000" selected>ふつう（1秒）</option>
+      <option value="500">速い（0.5秒）</option>
+      <option value="3000">とてもゆっくり（3秒）</option>
+      <option value="5000">ランダム向け（5秒）</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <h2>自動停止タイマー（プログラム外でも有効）</h2>
+    <select id="timerSel">
+      <option value="0" selected>なし</option>
+      <option value="5">5分</option>
+      <option value="10">10分</option>
+      <option value="15">15分</option>
+      <option value="20">20分</option>
+      <option value="30">30分</option>
+    </select>
+    <div class="timer" id="timerView"></div>
+  </div>
+
+  <button class="stop" id="stopBtn">■ すべて停止</button>
+
+  <p class="note" style="margin-top:16px;">
+    使い方：U.F.O.SA の電源を入れて（ランプ白・停止中）、「接続する」→ 一覧で UFOSA を選ぶ。<br>
+    PC：このファイルを Chrome / Edge で開く。 iPhone：Bluefy で https のURLとして開く（配信方法は要相談）。<br>
+    画面に「停止指令が届いていない可能性」と出たら、本体の電源で止めてください。
+  </p>
+</div>
+
+<script>
+'use strict';
+/* U.F.O.SA (VORZE SA series) BLE protocol — Qiita / Buttplug STPIHKAL (vorze-sa)
+   v2.1: cross-model audit fixes (stop-path hardening, queue retry/sticky-zero,
+   random-session consistency, background stop, state resets, input validation) */
+const SERVICE_UUID = '40ee1111-63ec-4b7f-8ce7-712efd55b90e';
+const CHAR_UUID    = '40ee2222-63ec-4b7f-8ce7-712efd55b90e';
+const DEVICE_ID    = 0x02; // UFOSA
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+let device = null, characteristic = null, connecting = false;
+let direction = 0, speed = 0, mode = 'manual';
+let patternTimer = null, phase = 0, pulseOn = true;
+let autoStopTimer = null, autoStopEnd = 0, timerTick = null;
+let wakeLock = null;
+
+function capSpeed(){ return parseInt($('cap').value, 10); }
+$('cap').addEventListener('input', e => { $('capVal').textContent = e.target.value; if (speed > capSpeed()) send(direction, capSpeed()); });
+function setStatus(html){ $('status').innerHTML = html; }
+function setAlarm(msg){ setStatus('<span class="alarm">⚠ ' + esc(msg) + '</span>'); }
+if (!navigator.bluetooth) $('bleWarn').style.display = 'block';
+
+/* ---------- BLE write layer ----------
+   - latest-value coalescing for normal updates
+   - stop (speed 0) is sticky: never overwritten before it is written
+   - identical consecutive values are not re-sent
+   - failed writes are retried (up to 3); a failed STOP raises an on-screen alarm
+   - writeValue hangs are bounded by a timeout so the queue cannot wedge */
+let pendingValue = null, pendingStop = false, writing = false, lastSentKey = '';
+function valueKey(v){ return v[0] + ',' + v[1] + ',' + v[2]; }
+function isStopValue(v){ return (v[2] & 0x7f) === 0; }
+async function writeChar(v){
+  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('write timeout')), 1500));
+  let p;
+  if (typeof characteristic.writeValue === 'function') p = characteristic.writeValue(v);
+  else if (typeof characteristic.writeValueWithResponse === 'function') p = characteristic.writeValueWithResponse(v);
+  else if (typeof characteristic.writeValueWithoutResponse === 'function') p = characteristic.writeValueWithoutResponse(v);
+  else throw new Error('no writable method');
+  return Promise.race([p, timeout]);
+}
+async function queueWrite(value){
+  if (isStopValue(value)) pendingStop = true; else pendingValue = value;
+  if (writing) return;
+  writing = true;
+  while (pendingStop || pendingValue !== null){
+    let v, fails = 0;
+    if (pendingStop){ v = new Uint8Array([DEVICE_ID, 0x01, (direction & 1) << 7]); pendingStop = false; }
+    else { v = pendingValue; pendingValue = null; }
+    if (valueKey(v) === lastSentKey) continue;
+    let ok = false;
+    while (!ok && fails < 3){
+      try { await writeChar(v); ok = true; }
+      catch(e){ fails++; console.warn('write failed (' + fails + ')', e); if (fails < 3) await new Promise(r => setTimeout(r, 120)); }
+    }
+    if (ok) lastSentKey = valueKey(v);
+    else if (isStopValue(v)) setAlarm('停止指令が届いていない可能性があります。本体の電源で停止してください');
+    else setStatus('⚠ 書き込みに失敗しました（接続を確認してください）');
+  }
+  writing = false;
+}
+function send(dir, spd){
+  spd = Math.max(0, Math.min(capSpeed(), Math.round(spd)));
+  speed = spd;
+  $('speedNum').textContent = spd;
+  if (mode === 'manual' && !prog.running) $('speed').value = spd;
+  if (!characteristic) return;
+  queueWrite(new Uint8Array([DEVICE_ID, 0x01, ((dir & 1) << 7) | spd]));
+}
+
+/* ---------- Connect / disconnect ---------- */
+$('connectBtn').addEventListener('click', async () => {
+  if (connecting) return;
+  if (device && device.gatt.connected){ await safeDisconnect(); return; }
+  connecting = true; $('connectBtn').disabled = true;
+  try{
+    try {
+      device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+    } catch(e1) {
+      if (e1 && e1.name === 'NotFoundError') throw e1; // user cancelled: do not reopen a picker
+      device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [SERVICE_UUID] });
+    }
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    characteristic = await service.getCharacteristic(CHAR_UUID);
+    lastSentKey = '';
+    setStatus('接続中： <b>' + esc(device.name || 'UFOSA') + '</b>');
+    $('connectBtn').textContent = '切断する';
+    send(direction, 0);
+  }catch(e){
+    if (device && device.gatt && device.gatt.connected) { try { device.gatt.disconnect(); } catch(_){} }
+    characteristic = null;
+    setStatus(e && e.name === 'NotFoundError' ? '未接続（選択がキャンセルされました）' : '未接続（接続に失敗しました）');
+    console.warn(e);
+  } finally {
+    connecting = false; $('connectBtn').disabled = false;
+  }
+});
+async function safeDisconnect(){
+  // Deliver the stop command BEFORE dropping the GATT link.
+  stopAll();
+  pendingValue = null;
+  let waited = 0;
+  while (writing && waited < 2000){ await new Promise(r => setTimeout(r, 25)); waited += 25; }
+  if (characteristic){
+    try { await writeChar(new Uint8Array([DEVICE_ID, 0x01, (direction & 1) << 7])); } catch(e){ console.warn('final stop write failed', e); }
+  }
+  if (device && device.gatt.connected) device.gatt.disconnect();
+}
+function onDisconnected(ev){
+  if (ev && ev.target && device && ev.target !== device) return; // stale device event
+  characteristic = null; pendingValue = null; pendingStop = false; lastSentKey = '';
+  stopPattern(); stopProgram(false);
+  stopAutoTimer(true);
+  setModeSilentManual();
+  speed = 0; $('speedNum').textContent = 0; $('speed').value = 0;
+  setStatus('未接続（切断されました）');
+  $('connectBtn').textContent = '接続する';
+}
+
+/* ---------- Manual ---------- */
+$('speed').addEventListener('input', e => { stopProgram(true); if (mode !== 'manual') setMode('manual'); send(direction, parseInt(e.target.value, 10)); });
+document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => { stopProgram(true); setMode('manual'); send(direction, parseInt(b.dataset.preset, 10)); $('speed').value = b.dataset.preset; }));
+function setDirection(d, silent){
+  direction = d;
+  $('dirCw').classList.toggle('on', d === 0);
+  $('dirCcw').classList.toggle('on', d === 1);
+  if (!silent && mode === 'manual' && !prog.running) send(direction, speed);
+}
+function directionButton(d){
+  if (prog.running) stopProgram(true); // manual takeover: stop the program first
+  stopPattern(); setModeSilentManual();
+  setDirection(d, true);
+  send(direction, 0);
+  $('taskText').textContent = '手動に切り替えました（停止中）。スライダーで再開できます。';
+}
+$('dirCw').addEventListener('click', () => directionButton(0));
+$('dirCcw').addEventListener('click', () => directionButton(1));
+
+/* ---------- Quick patterns ---------- */
+function patMin(){ return parseInt($('patMin').value, 10); }
+function patMax(){ return parseInt($('patMax').value, 10); }
+$('patMin').addEventListener('input', e => {
+  if (patMin() > patMax()){ $('patMax').value = patMin(); $('maxVal').textContent = patMin(); }
+  $('minVal').textContent = e.target.value;
+});
+$('patMax').addEventListener('input', e => {
+  if (patMax() < patMin()){ $('patMin').value = patMax(); $('minVal').textContent = patMax(); }
+  $('maxVal').textContent = e.target.value;
+});
+function stopPattern(){
+  if (patternTimer){ clearInterval(patternTimer); clearTimeout(patternTimer); patternTimer = null; }
+}
+function setModeSilentManual(){
+  mode = 'manual';
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === 'manual'));
+}
+function setMode(m){
+  mode = m;
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  stopPattern();
+  if (m === 'manual' || !characteristic) return;
+  phase = 0; pulseOn = true;
+  const iv = parseInt($('interval').value, 10);
+  if (m === 'wave'){
+    const stepRad = (2 * Math.PI * 250) / (iv * 4); // iv=1000 -> ~4s period (same as before)
+    patternTimer = setInterval(() => { phase += stepRad; send(direction, patMin() + (patMax()-patMin()) * (0.5 - 0.5*Math.cos(phase))); }, 250);
+  } else if (m === 'pulse'){
+    patternTimer = setInterval(() => { pulseOn = !pulseOn; send(direction, pulseOn ? patMax() : 0); }, iv); send(direction, patMax());
+  } else if (m === 'random'){
+    const tick = () => { if (Math.random() < 0.35) setDirection(Math.random() < 0.5 ? 0 : 1, true); send(direction, patMin() + Math.random()*(patMax()-patMin())); patternTimer = setTimeout(tick, iv * (0.6 + Math.random()*0.9)); };
+    tick();
+  } else if (m === 'escalate'){
+    let cur = patMin();
+    patternTimer = setInterval(() => { cur += 5; if (cur > patMax()) cur = patMin(); send(direction, cur); }, iv); send(direction, cur);
+  } else if (m === 'alt'){
+    patternTimer = setInterval(() => { setDirection(direction === 0 ? 1 : 0, true); send(direction, patMax()); }, iv); send(direction, patMax());
+  }
+}
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+  const wasRunning = prog.running;
+  if (prog.running) stopProgram(false);
+  if (b.dataset.mode === 'manual'){
+    // Switching to manual must never leave the last speed running unattended.
+    stopPattern(); setModeSilentManual(); send(direction, 0); $('speed').value = 0;
+    if (wasRunning) $('taskText').textContent = '手動に切り替えました（停止中）。';
+  } else setMode(b.dataset.mode);
+}));
+$('interval').addEventListener('change', () => { if (mode !== 'manual' && !prog.running) setMode(mode); });
+
+/* ---------- Auto-stop timer ---------- */
+$('timerSel').addEventListener('change', e => {
+  stopAutoTimer(false);
+  const min = parseInt(e.target.value, 10);
+  if (!min){ $('timerView').textContent = ''; return; }
+  autoStopEnd = Date.now() + min*60*1000;
+  autoStopTimer = setTimeout(() => {
+    stopAutoTimer(true);
+    stopAll();
+    $('timerView').textContent = 'タイマーで停止しました';
+  }, min*60*1000);
+  timerTick = setInterval(() => {
+    const left = Math.max(0, Math.round((autoStopEnd - Date.now())/1000));
+    $('timerView').textContent = '自動停止まで あと ' + Math.floor(left/60) + '分' + (left%60) + '秒';
+  }, 500);
+});
+function stopAutoTimer(resetUi){
+  if (autoStopTimer){ clearTimeout(autoStopTimer); autoStopTimer = null; }
+  if (timerTick){ clearInterval(timerTick); timerTick = null; }
+  if (resetUi){ $('timerSel').value = '0'; $('timerView').textContent = ''; }
+}
+
+/* ================= Program engine ================= */
+const PATTERN_LABEL = { fixed:'一定', wave:'ウェーブ', pulse:'パルス', random:'ランダム', escalate:'じわ上げ', descend:'じわ下げ', stop:'停止' };
+const PRESETS = {
+  test: [
+    {name:'テスト1・時計回り', seconds:15, pattern:'fixed', min:20, max:20, dir:'cw',   text:'時計回りに速度20で回ればOK。'},
+    {name:'テスト2・反時計回り', seconds:15, pattern:'fixed', min:20, max:20, dir:'ccw', text:'反時計回りに速度20で回ればOK。'},
+    {name:'テスト3・ウェーブ', seconds:15, pattern:'wave',  min:10, max:40, dir:'keep', text:'速度が10〜40の間で揺れればOK。'},
+    {name:'テスト4・停止', seconds:15, pattern:'stop',  min:0,  max:0,  dir:'keep', text:'止まっていればOK。これでテスト完了。'}
+  ],
+  endurance: [
+    {name:'ウォームアップ', seconds:60,  pattern:'wave',     min:5,  max:25, dir:'keep', text:'ゆっくり慣らしていく。呼吸を整えて、力を抜く。'},
+    {name:'課題1・一定',     seconds:90,  pattern:'fixed',    min:40, max:40, dir:'cw',   text:'速度は変わらない。このまま姿勢を保つ。呼吸を数えながら耐える。'},
+    {name:'課題2・パルス',   seconds:90,  pattern:'pulse',    min:0,  max:55, dir:'keep', text:'強弱の波に身を任せる。弱い瞬間も、集中を切らさない。'},
+    {name:'小休止',          seconds:30,  pattern:'stop',     min:0,  max:0,  dir:'keep', text:'完全停止。余韻だけを感じる。'},
+    {name:'課題3・ランダム', seconds:120, pattern:'random',   min:30, max:70, dir:'alternate', text:'次にどう変わるか分からない。方向も変わる。ただ受け止める。'},
+    {name:'課題4・じわ上げ', seconds:120, pattern:'escalate', min:45, max:85, dir:'keep', text:'少しずつ上がっていく。最後まで姿勢を崩さない。'},
+    {name:'クールダウン',    seconds:60,  pattern:'descend',  min:5,  max:20, dir:'keep', text:'ゆっくり落としていく。深呼吸で締める。'}
+  ],
+  stopgo: [
+    {name:'ウォームアップ', seconds:60,  pattern:'wave',     min:20, max:50, dir:'keep', text:'波に乗ってウォームアップ。'},
+    {name:'課題1',           seconds:50,  pattern:'fixed',    min:65, max:65, dir:'keep', text:'この強さでキープ。'},
+    {name:'焦らし停止1',     seconds:20,  pattern:'stop',     min:0,  max:0,  dir:'keep', text:'止まっても動かない。余韻に耐える。'},
+    {name:'課題2',           seconds:50,  pattern:'wave',     min:55, max:75, dir:'flip', text:'方向が変わった。波のままキープ。'},
+    {name:'焦らし停止2',     seconds:20,  pattern:'stop',     min:0,  max:0,  dir:'keep', text:'また停止。次が来るまで待つ。'},
+    {name:'課題3',           seconds:50,  pattern:'fixed',    min:85, max:85, dir:'keep', text:'今日一番の強さ。姿勢を保つ。'},
+    {name:'焦らし停止3',     seconds:20,  pattern:'stop',     min:0,  max:0,  dir:'keep', text:'最後の停止。油断しない。'},
+    {name:'仕上げ・じわ上げ', seconds:90, pattern:'escalate', min:60, max:90, dir:'alternate', text:'仕上げ。上がりながら方向も変わる。最後まで受け止める。'},
+    {name:'クールダウン',    seconds:60,  pattern:'descend',  min:10, max:25, dir:'keep', text:'落として締める。深呼吸。'}
+  ],
+  gentle: [
+    {name:'課題1・呼吸を数える', seconds:120, pattern:'wave',    min:5,  max:30, dir:'keep', text:'課題1。姿勢を決めたら、もう動かない。波に合わせて呼吸を数える。4つ数えて吸う、4つ数えて吐く。気持ちいい？ 答えは心の中で、うなずくだけでいい。'},
+    {name:'課題2・波に集中',     seconds:180, pattern:'wave',    min:15, max:45, dir:'keep', text:'課題2。波が強くなる瞬間だけに集中する。強くなった、と思ったら心の中で「今」と言う。もっと欲しい？ 思うだけでいい。姿勢は最後まで崩さない。'},
+    {name:'課題3・向きの違い',   seconds:120, pattern:'wave',    min:10, max:35, dir:'flip', text:'課題3。回転が逆になった。さっきとの違いだけを比べる。どっちが気持ちいい？ 答えは一言でいい。考えるな、感じる方を選ぶだけ。'},
+    {name:'仕上げ・力を抜く',   seconds:60,  pattern:'descend', min:5,  max:15, dir:'keep', text:'仕上げ。弱くなっていくのに合わせて、身体の力を1つずつ抜いていく。終わりの合図が来るまで、そのまま動かない。最後に深呼吸を3回。'}
+  ]
+};
+function buildRandomSession(){
+  const texts = [
+    '予測しない。来たものをそのまま受ける。',
+    '方向も強さも、こちらでは決められない。',
+    '変わる瞬間に、身体の反応を観察する。',
+    '同じ刺激は続かない。油断しない。',
+    '呼吸だけは自分のペースで保つ。'
+  ];
+  const steps = [{name:'ウォームアップ', seconds:60, pattern:'wave', min:5, max:25, dir:'keep', text:'まずは慣らす。'}];
+  let elapsedBand = 0, i = 0;
+  while (elapsedBand < 540){
+    const band = elapsedBand < 180 ? [15,45] : (elapsedBand < 380 ? [35,70] : [50,88]);
+    if (Math.random() < 0.18){
+      const sec = 15 + Math.floor(Math.random()*10);
+      steps.push({name:'焦らし停止', seconds:sec, pattern:'stop', min:0, max:0, dir:'keep', text:'突然の停止。待つことも課題のうち。'});
+      elapsedBand += sec;
+    } else {
+      const pat = ['random','pulse','wave','fixed'][Math.floor(Math.random()*4)];
+      const sec = 40 + Math.floor(Math.random()*50);
+      steps.push({name:'課題' + (++i), seconds:sec, pattern:pat, min:band[0], max:band[1],
+        dir: Math.random() < 0.4 ? 'flip' : 'keep',
+        text: texts[Math.floor(Math.random()*texts.length)]});
+      elapsedBand += sec;
+    }
+  }
+  steps.push({name:'クールダウン', seconds:60, pattern:'descend', min:5, max:20, dir:'keep', text:'落として締める。深呼吸。'});
+  return steps;
+}
+
+/* Long flowing narration tracks, keyed by program. `at` = elapsed seconds in the whole program.
+   Cues are offset a few seconds after step boundaries so they do not collide with step announcements. */
+const NARRATIONS = {
+  gentle: [
+    {at:5,   text:'始まったよ。姿勢はもう決めたね。ここからは、動かないのが君の仕事。波が来るのを、ただ待って。'},
+    {at:20,  text:'波がゆっくり強くなって、ゆっくり弱くなる。そのリズムに呼吸を重ねて。強くなるのに合わせて吸って、弱くなるのに合わせて吐く。'},
+    {at:45,  text:'そう、上手。考えなくていい。波と呼吸が合ってきたら、あとは身体が勝手にやってくれる。'},
+    {at:70,  text:'気持ちいい？ うなずくだけでいい。答えようとしなくていい、思うだけでいいから。'},
+    {at:95,  text:'波の頂点で、一瞬だけ息を止めてみて。……それから、ゆっくり吐く。頂点の感覚が、少しだけ長く残るから。'},
+    {at:128, text:'少しだけ強くなった。気づいた？ 怖がらなくていい、まだゆったりの範囲。呼吸のリズムだけ、崩さないで。'},
+    {at:155, text:'頂点が来るたびに、心の中で数えて。1つ目、2つ目……。数えることに集中すると、他のことは頭から消えていく。'},
+    {at:190, text:'数えるの、上手だね。そのまま。波に任せて、力は入れない。入れたくなっても、我慢するのが今日の課題だから。'},
+    {at:225, text:'もっと欲しい、と思った？ 思ったなら、それで正解。でも、増えるかどうかは波が決める。君は待つだけ。'},
+    {at:260, text:'そろそろ、何かが変わる頃。……まだ言わない。変わった瞬間に気づけるかどうか、試してる。'},
+    {at:285, text:'あと少しで分かる。集中して。身体のどこで感じているか、それだけを追って。'},
+    {at:308, text:'向きが変わった。分かったね。さっきと比べて、どっちが気持ちいい？ 一言でいい、心の中で答えて。'},
+    {at:340, text:'選んだ方を、よく覚えておいて。今は逆側の時間を、最後まで味わう。途中で動かない。'},
+    {at:375, text:'波は相変わらずゆっくり。でも感覚はさっきよりはっきりしているはず。弱い波でも、もう分かるね。'},
+    {at:405, text:'もう少しで終わりに向かう。終わってほしくない、と思った？ 思ったなら、今日は成功だよ。'},
+    {at:428, text:'ここからは弱くなっていく。波が引いていくのに合わせて、身体の力を1つずつ抜いて。肩、腕、腰……。'},
+    {at:455, text:'呼吸を深く、3回。吸って、吐いて。終わっても、すぐには動かない。余韻が消えるまで、そのままでいるのが最後の課題。'},
+    {at:475, text:'もうすぐ終わる。よく頑張った。合図が来たら、ゆっくり目を開けて。'}
+  ],
+  test: [
+    {at:3,  text:'テストを始めるよ。回るかどうか、よく見ていて。'},
+    {at:18, text:'向きが変わるよ。反対に回っている？'},
+    {at:33, text:'波みたいに強さが揺れるよ。画面の数字と合っている？'},
+    {at:48, text:'最後は止まるよ。止まったら、テスト成功。'}
+  ],
+  endurance: [
+    {at:5,   text:'始めるよ。今日は少し長め。最初はゆっくり、波に身体を慣らしていく。'},
+    {at:25,  text:'波のリズム、掴めた？ 呼吸を合わせて。まだ何も頑張らなくていい。'},
+    {at:50,  text:'そろそろ次の段階。強さが変わるけど、姿勢だけはそのまま。'},
+    {at:68,  text:'一定になった。逃げ場のない速さだね。ここからが課題。呼吸を数えながら、ただ耐える。'},
+    {at:95,  text:'揺れない分、感覚がはっきりする。気持ちいい？ 正直に思うだけでいい。'},
+    {at:125, text:'あと少しで変わる。最後まで姿勢を崩さない。それが約束。'},
+    {at:158, text:'波みたいに強弱が来るようになった。強い瞬間も、弱い瞬間も、どっちも味わって。'},
+    {at:185, text:'弱くなった瞬間に、ほっとしてない？ してていい。でも集中は切らさない。次がいつ来るか分からないから。'},
+    {at:215, text:'強弱の間隔、身体が覚えてきた頃だね。その調子。'},
+    {at:245, text:'止まった。……余韻だけが残っている。動かないで。この静けさも課題のうち。'},
+    {at:278, text:'ここからは予測できないやつ。強さも向きも、向こうが決める。君は受け止めるだけ。'},
+    {at:310, text:'変わった瞬間、分かった？ 分からなかったら、それも正直に認めて。次は当てて。'},
+    {at:345, text:'急に強くなることもある。驚いても、呼吸だけは止めない。'},
+    {at:380, text:'そろそろ終盤の準備。ここまでよく耐えた。'},
+    {at:398, text:'最後の課題。ここからは、少しずつ、確実に上がっていく。下がることはないから。'},
+    {at:435, text:'上がっているの、分かるね。逃げられない上がり方をする。姿勢、まだ保てる？'},
+    {at:470, text:'一番強いところに近づいている。あと少し。数えるのはやめて、ただ感じて。'},
+    {at:505, text:'よく耐えた。ここからは下がっていく。'},
+    {at:518, text:'力、抜いていいよ。波が引いていくのに任せて、呼吸を整えて。'},
+    {at:550, text:'終わりが近い。終わってもすぐ動かない。余韻の中で、今日の感覚を覚えておいて。'},
+    {at:565, text:'もうすぐ合図が来る。おつかれさま。'}
+  ],
+  stopgo: [
+    {at:5,   text:'始めるよ。今日は「止まる」ことが多い日。止まる時間も、課題だと思って。'},
+    {at:25,  text:'波でウォームアップ。身体を慣らして。呼吸も合わせて。'},
+    {at:55,  text:'そろそろ本番。いきなり強くなるから、覚悟して。'},
+    {at:68,  text:'強いね。でも、まだ序盤。この強さでキープするのが課題。'},
+    {at:95,  text:'気持ちいい？ 苦しい？ どっちでもいい、正直に思うだけ。'},
+    {at:112, text:'止まった。……ほら、急に静か。余韻に耐える時間。動かない。'},
+    {at:135, text:'また動き出した。向き、変わったの気づいた？ 波のまま、キープして。'},
+    {at:165, text:'強弱の波、さっきより大きいね。身体を任せて。'},
+    {at:185, text:'止まった。2回目。次がいつ来るかは、言わない。待つのが君の仕事。'},
+    {at:208, text:'今日一番の強さ。姿勢を保って。ここを耐えれば、あとは仕上げだけ。'},
+    {at:235, text:'一番強いところ、よく耐えている。あと少し。'},
+    {at:255, text:'止まった。最後の停止。油断しないで。まだ終わっていないから。'},
+    {at:278, text:'仕上げ。上がりながら、向きも変わる。全部受け止めて。'},
+    {at:315, text:'一番上がったところ。ここが今日の頂点。感じて。'},
+    {at:345, text:'そろそろ下がり始める。力を抜く準備を。'},
+    {at:368, text:'落ちていくよ。呼吸を整えて、身体の力を1つずつ抜いて。'},
+    {at:400, text:'終わりが近い。余韻の時間。そのまま動かないで。'},
+    {at:415, text:'もうすぐ合図。おつかれさま、よく頑張った。'}
+  ],
+  randomSession: [
+    {at:5,   text:'始めるよ。今日の中身は、君にも、まだ分からない。毎回違うから。'},
+    {at:30,  text:'最初は慣らす時間。波に任せて、呼吸を整えて。'},
+    {at:70,  text:'そろそろ本編。ここからは、何が来るか分からない。予測するのをやめるのが課題。'},
+    {at:115, text:'変わった？ 強さか、向きか、止まったか。分かったら心の中で答えて。'},
+    {at:160, text:'同じ刺激は続かない。油断した頃に変わるから、ずっと集中して。'},
+    {at:205, text:'止まったなら、それも流れのうち。余韻に耐えて、次を待って。'},
+    {at:250, text:'強くなったなら、姿勢で受け止めて。弱くなったなら、物足りなさを楽しんで。'},
+    {at:300, text:'ちょうど真ん中あたり。まだ先は長い。呼吸だけは自分のペースを守って。'},
+    {at:350, text:'もっと欲しい？ その気持ち、隠さなくていい。でも決めるのはこちら。'},
+    {at:400, text:'強さの出方が変わってきたの、分かる？ 後半は、少し意地悪になる。'},
+    {at:460, text:'変わる瞬間を当てる遊びをしよう。次は強くなるか、弱くなるか。心の中で賭けて。'},
+    {at:520, text:'一番しんどい時間帯。でも、終わりは近づいている。あと少しだけ耐えて。'},
+    {at:580, text:'そろそろ締めに入る頃。力を抜く準備をしながら、最後まで受け止めて。'},
+    {at:640, text:'もうすぐ終わる。余韻を味わって。合図が来るまで動かない。'}
+  ],
+  custom: [
+    {at:5,   text:'始まったよ。姿勢を決めて、呼吸を整えて。ここからは流れに任せて。'},
+    {at:60,  text:'波や強さの変化に、呼吸を合わせていく。考えるより、感じる方に集中して。'},
+    {at:130, text:'気持ちいい？ 心の中で一言で答えるだけでいい。'},
+    {at:210, text:'姿勢、崩れていない？ 崩れていたら、静かに直して。そのまま続ける。'},
+    {at:300, text:'ちょうど中ほど。集中が切れてきたら、呼吸を数え直して。'},
+    {at:390, text:'変わる瞬間に集中して。次に何が来るか、身体で待って。'},
+    {at:480, text:'終わりが近づいてきたら、少しずつ力を抜く準備を。'},
+    {at:570, text:'もうすぐ終わる。余韻の中で、そのまま動かないで。'}
+  ]
+};
+
+/* custom program (localStorage) */
+function loadCustom(){
+  try { return JSON.parse(localStorage.getItem('ufosa-custom') || '[]'); } catch(e){ return []; }
+}
+function saveCustom(list){
+  try { localStorage.setItem('ufosa-custom', JSON.stringify(list)); return true; }
+  catch(e){ setStatus('⚠ 保存に失敗しました（このブラウザでは自作プログラムを保存できません）'); return false; }
+}
+function renderCustom(){
+  const list = loadCustom();
+  $('customList').innerHTML = list.map((s, idx) =>
+    '<div class="custom-item"><span>' + (idx+1) + '. ' + esc(s.name) + '（' + s.seconds + '秒・' + esc(PATTERN_LABEL[s.pattern]||s.pattern) + ' ' + s.min + '-' + s.max + '）<br>' + esc(s.text) + '</span><button data-del="' + idx + '">削除</button></div>'
+  ).join('');
+  document.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
+    const l = loadCustom(); l.splice(parseInt(b.dataset.del, 10), 1);
+    if (saveCustom(l)){ renderCustom(); renderStepsPreview(); }
+  }));
+}
+$('csAdd').addEventListener('click', () => {
+  let sec = parseInt($('csSec').value, 10); if (isNaN(sec)) sec = 60;
+  sec = Math.min(1800, Math.max(5, sec));
+  let mn = parseInt($('csMin').value, 10); if (isNaN(mn)) mn = 0;
+  let mx = parseInt($('csMax').value, 10); if (isNaN(mx)) mx = 0;
+  mn = Math.min(100, Math.max(0, mn)); mx = Math.min(100, Math.max(0, mx));
+  if (mn > mx){ const t = mn; mn = mx; mx = t; }
+  const l = loadCustom();
+  l.push({ name: $('csName').value || 'ステップ', text: $('csText').value || '', seconds: sec, pattern: $('csPattern').value, min: mn, max: mx, dir: $('csDir').value });
+  if (saveCustom(l)){ renderCustom(); renderStepsPreview(); }
+});
+$('csClear').addEventListener('click', () => { if (saveCustom([])){ renderCustom(); renderStepsPreview(); } });
+
+function currentProgramSteps(){
+  if (prog.running) return prog.steps;
+  const key = $('programSel').value;
+  if (key === 'randomSession'){ if (!prog.generated) prog.generated = buildRandomSession(); return prog.generated; }
+  if (key === 'custom') return loadCustom();
+  return PRESETS[key] || [];
+}
+function fmt(sec){ sec = Math.max(0, Math.ceil(sec)); return Math.floor(sec/60) + ':' + String(sec%60).padStart(2, '0'); }
+function renderStepsPreview(){
+  const steps = currentProgramSteps();
+  const total = steps.reduce((a, s) => a + s.seconds, 0);
+  $('stepsList').innerHTML = steps.map((s, idx) =>
+    '<li class="' + (prog.running && idx === prog.index ? 'now' : '') + '">' + esc(s.name) + '（' + fmt(s.seconds) + '・' + esc(PATTERN_LABEL[s.pattern]||s.pattern) + ' ' + s.min + '-' + s.max + '）</li>'
+  ).join('') + (steps.length ? '<li>合計 約' + fmt(total) + '</li>' : '<li>ステップがありません。自作プログラムを編集してください。</li>');
+}
+$('programSel').addEventListener('change', () => { prog.generated = null; renderStepsPreview(); });
+
+/* runner */
+const prog = { running:false, paused:false, steps:[], index:0, stepStart:0, elapsedBeforePause:0, tick:null, randTarget:null, randNextAt:0, lastDirFlipAt:0, generated:null, narration:null, narrFired:-1 };
+function speak(text){
+  if (!$('voiceOn').checked || !('speechSynthesis' in window) || !text) return;
+  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = 'ja-JP'; u.rate = 0.95; speechSynthesis.speak(u); } catch(e){}
+}
+function cancelSpeak(){ if ('speechSynthesis' in window) try { speechSynthesis.cancel(); } catch(e){} }
+$('voiceOn').addEventListener('change', e => {
+  if (e.target.checked) speak('読み上げをオンにしました');
+  else cancelSpeak();
+});
+async function acquireWakeLock(){
+  try { if ('wakeLock' in navigator){ wakeLock = await navigator.wakeLock.request('screen'); } } catch(e){}
+}
+function releaseWakeLock(){ try { if (wakeLock){ wakeLock.release(); wakeLock = null; } } catch(e){} }
+
+function startProgram(){
+  const steps = currentProgramSteps();
+  if (!steps.length){ $('taskText').textContent = 'ステップがありません。自作プログラムを追加してください。'; return; }
+  if (!characteristic){ $('taskText').textContent = '先に U.F.O.SA へ接続してください。'; return; }
+  stopPattern(); setModeSilentManual();
+  prog.steps = steps; prog.index = 0; prog.running = true; prog.paused = false;
+  prog.narration = NARRATIONS[$('programSel').value] || null;
+  prog.narrFired = -1;
+  $('narrText').textContent = prog.narration ? '' : 'このプログラムにナレーションはありません。';
+  $('progStart').textContent = '■ 終了'; $('progPause').disabled = false; $('progSkip').disabled = false;
+  acquireWakeLock();
+  beginStep(0, 0);
+}
+function beginStep(idx, overflowSec){
+  prog.index = idx;
+  const s = prog.steps[idx];
+  prog.stepStart = performance.now(); prog.elapsedBeforePause = overflowSec || 0;
+  prog.randTarget = null; prog.randNextAt = 0; prog.lastDirFlipAt = 0;
+  if (s.dir === 'cw') setDirection(0, true);
+  else if (s.dir === 'ccw') setDirection(1, true);
+  else if (s.dir === 'flip') setDirection(direction === 0 ? 1 : 0, true);
+  $('taskText').textContent = s.text || s.name;
+  $('stepName').textContent = '課題 ' + (idx+1) + ' / ' + prog.steps.length + '： ' + s.name;
+  speak(s.text || s.name);
+  renderStepsPreview();
+  if (prog.tick) clearInterval(prog.tick);
+  prog.tick = setInterval(programTick, 200);
+  programTick();
+}
+function stepSpeedAt(s, t){
+  const p = Math.min(1, t / s.seconds);
+  switch(s.pattern){
+    case 'stop': return 0;
+    case 'fixed': return s.max;
+    case 'wave': return s.min + (s.max - s.min) * (0.5 - 0.5 * Math.cos(2 * Math.PI * t / 10));
+    case 'pulse': return (Math.floor(t / 1.6) % 2 === 0) ? s.max : s.min;
+    case 'escalate': return s.min + (s.max - s.min) * p;
+    case 'descend': return s.max - (s.max - s.min) * p;
+    case 'random': {
+      if (prog.randTarget === null || t >= prog.randNextAt){
+        prog.randTarget = s.min + Math.random() * (s.max - s.min);
+        prog.randNextAt = t + 2 + Math.random() * 3;
+      }
+      return prog.randTarget;
+    }
+    default: return s.min;
+  }
+}
+function fireNarration(elapsedTotal){
+  if (!prog.narration || !$('narrOn').checked) return;
+  let idx = -1;
+  for (let i = 0; i < prog.narration.length; i++){ if (prog.narration[i].at <= elapsedTotal) idx = i; else break; }
+  if (idx > prog.narrFired){
+    prog.narrFired = idx;
+    $('narrText').textContent = prog.narration[idx].text;
+    speak(prog.narration[idx].text);
+  }
+}
+function programTick(){
+  if (!prog.running || prog.paused) return;
+  let s = prog.steps[prog.index];
+  let t = prog.elapsedBeforePause + (performance.now() - prog.stepStart) / 1000;
+  // Carry overflow into following steps (tab throttling / sleep gaps), finish if all consumed.
+  while (t >= s.seconds){
+    const overflow = t - s.seconds;
+    if (prog.index + 1 < prog.steps.length){ beginStep(prog.index + 1, overflow); return; }
+    finishProgram(); return;
+  }
+  if (s.dir === 'alternate' && t - prog.lastDirFlipAt >= 6){ prog.lastDirFlipAt = t; setDirection(direction === 0 ? 1 : 0, true); }
+  send(direction, stepSpeedAt(s, t));
+  $('countdown').textContent = fmt(s.seconds - t);
+  const doneBefore = prog.steps.slice(0, prog.index).reduce((a, x) => a + x.seconds, 0);
+  const total = prog.steps.reduce((a, x) => a + x.seconds, 0);
+  $('progBar').style.width = (100 * (doneBefore + t) / total) + '%';
+  $('stepInfo').textContent = '全体の残り ' + fmt(total - doneBefore - t) + ' ／ 現在の速度 ' + speed;
+  fireNarration(doneBefore + t);
+}
+function finishProgram(){
+  stopProgram(true); // natural completion MUST send stop
+  $('taskText').textContent = 'プログラム終了。おつかれさま。';
+  $('stepName').textContent = '完了'; $('countdown').textContent = '0:00'; $('progBar').style.width = '100%';
+  $('stepInfo').textContent = '';
+  speak('プログラム終了です');
+  prog.generated = null; renderStepsPreview();
+}
+function stopProgram(sendZero){
+  if (prog.tick){ clearInterval(prog.tick); prog.tick = null; }
+  const was = prog.running;
+  prog.running = false; prog.paused = false;
+  releaseWakeLock();
+  cancelSpeak();
+  $('progStart').textContent = '▶ 開始'; $('progPause').disabled = true; $('progSkip').disabled = true; $('progPause').textContent = '⏸ 一時停止';
+  if (was && sendZero) send(direction, 0);
+  if (was){ $('stepName').textContent = '待機中'; $('countdown').textContent = '--:--'; $('progBar').style.width = '0%'; }
+}
+$('progStart').addEventListener('click', () => { if (prog.running) { stopProgram(true); $('taskText').textContent = 'プログラムを終了しました。'; } else startProgram(); });
+$('progPause').addEventListener('click', () => {
+  if (!prog.running) return;
+  if (!prog.paused){
+    prog.paused = true;
+    prog.elapsedBeforePause += (performance.now() - prog.stepStart) / 1000;
+    cancelSpeak();
+    send(direction, 0);
+    $('progPause').textContent = '▶ 再開';
+  } else {
+    prog.paused = false; prog.stepStart = performance.now();
+    $('progPause').textContent = '⏸ 一時停止';
+  }
+});
+$('progSkip').addEventListener('click', () => {
+  if (!prog.running) return;
+  prog.paused = false; $('progPause').textContent = '⏸ 一時停止';
+  if (prog.index + 1 < prog.steps.length) beginStep(prog.index + 1, 0); else finishProgram();
+});
+
+/* ---------- Background safety (best effort) ---------- */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden){ if (prog.running || patternTimer || speed > 0) stopAll(); }
+  else if (prog.running) acquireWakeLock();
+});
+window.addEventListener('pagehide', () => { stopAll(); });
+
+/* ---------- Stop all ---------- */
+function stopAll(){
+  stopPattern(); stopProgram(false); setModeSilentManual();
+  stopAutoTimer(true);
+  cancelSpeak();
+  send(direction, 0); $('speed').value = 0;
+}
+$('stopBtn').addEventListener('click', stopAll);
+
+renderCustom();
+renderStepsPreview();
+</script>
+</body>
+</html>
